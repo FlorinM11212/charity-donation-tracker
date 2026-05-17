@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project runtime artefacts (regenerated on each run; not committed)
+data.json
+data.json.broken.*
+donations_export.csv
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
