@@ -6,10 +6,27 @@ is wrapped so a typo never crashes the program — bad input prints a
 clear message and re-prompts.
 """
 
+import sys
 from typing import Callable
 
 from src import reports, storage
 from src.donation_service import DonationService
+
+
+# Windows defaults stdout to cp1252, which cannot encode ✓ / ✗ / £ /
+# en-dashes. Force UTF-8 at startup so the spec's exact glyphs always
+# render. ``reconfigure`` exists from Python 3.7 and is a no-op on
+# already-UTF-8 streams.
+def _force_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            # Non-text streams (rare) or already-closed streams: ignore.
+            pass
+
+
+_force_utf8_stdio()
 
 
 # ---- Small console helpers -------------------------------------------------
@@ -22,21 +39,26 @@ SUB_BORDER = "-" * 60
 def _ask(prompt: str) -> str:
     """Read a line from stdin. Strips trailing newline and surrounding spaces.
 
-    Wrapped in try/except so EOFError (e.g. piped input ending) returns "" and
-    KeyboardInterrupt bubbles up to the main loop where we save and exit.
+    KeyboardInterrupt bubbles up to the main loop, where we save and exit.
+    EOF (piped input exhausted, terminal closed) is also propagated; the
+    main loop catches it and treats it as a clean save-and-exit so the
+    program does not spin forever re-prompting on an empty stdin.
     """
-    try:
-        return input(prompt).strip()
-    except EOFError:
-        return ""
+    return input(prompt).strip()
 
 
 def _pause() -> None:
-    """Standard 'press Enter' pause used at the end of every action."""
+    """Standard 'press Enter' pause used at the end of every action.
+
+    If stdin is not a TTY (e.g. piped input during a smoke test) the pause
+    is skipped — otherwise we'd burn the EOF here and then loop forever in
+    the calling menu. Real terminals always pause as expected.
+    """
+    if not sys.stdin.isatty():
+        return
     try:
         input("\nPress Enter to continue...")
     except EOFError:
-        # No interactive stdin (e.g. tests piping input): just continue.
         pass
 
 
@@ -350,6 +372,11 @@ def main() -> None:
         # Ctrl+C anywhere: still save before exiting (FR-5.3 / section 9).
         storage.save(service.donors, service.campaigns, service.donations)
         print("\n\nInterrupted. Data saved. Goodbye!")
+    except EOFError:
+        # stdin closed (piped input exhausted, terminal hangup): same
+        # treatment as a clean exit, just without the goodbye animation.
+        storage.save(service.donors, service.campaigns, service.donations)
+        print("\n\nInput stream closed. Data saved. Goodbye!")
 
 
 if __name__ == "__main__":
