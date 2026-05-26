@@ -1,8 +1,7 @@
-"""Reporting: aggregate views over the service state and CSV export.
+"""The reports the user can see in the menu, plus the CSV export.
 
-Functions in this module return strings (or, for export, write a file and
-return a status string). Keeping them pure makes them straightforward to
-unit-test without a full menu loop driving them.
+Each function builds a string with the report text and returns it.
+The CSV export writes a file and returns a confirmation message.
 """
 
 import csv
@@ -11,16 +10,19 @@ from typing import List, Tuple
 from src.donation_service import DonationService
 
 
+# The name of the file the CSV export writes to.
 CSV_EXPORT_PATH = "donations_export.csv"
 
 
 def total_donations_summary(service: DonationService) -> str:
-    """FR-4.1: how many donations, total raised, and counts by category."""
+    """Build the 'total donations' report."""
+    # Count things up
     n_donations = len(service.donations)
     total_raised = sum(d.amount for d in service.donations.values())
     active = sum(1 for c in service.campaigns.values() if not c.is_closed)
     closed = sum(1 for c in service.campaigns.values() if c.is_closed)
     n_donors = len(service.donors)
+    # Build the lines of the report
     lines = [
         "---  Total Donations Summary  ---",
         "",
@@ -34,8 +36,8 @@ def total_donations_summary(service: DonationService) -> str:
 
 
 def top_donors(service: DonationService, k: int = 3) -> str:
-    """FR-4.2: top ``k`` donors by total contribution."""
-    # Pre-compute per-donor totals once instead of per-comparator call.
+    """Build the 'top k donors' report. By default it shows the top 3."""
+    # For every donor, work out how much they gave in total
     totals: List[Tuple[str, float, int]] = []
     for donor in service.donors.values():
         donor_total = sum(
@@ -43,19 +45,22 @@ def top_donors(service: DonationService, k: int = 3) -> str:
             for d_id in donor.donations
             if d_id in service.donations
         )
+        # Only count donors who actually gave something
         if donor_total > 0:
             totals.append((donor.name, donor_total, len(donor.donations)))
 
+    # Sort from biggest total to smallest, then keep only the top k
     totals.sort(key=lambda row: row[1], reverse=True)
     top_k = totals[:k]
 
+    # Handle the case where nobody has donated yet
     if not top_k:
         return "---  Top 3 Donors  ---\n\n  (no donations recorded yet)"
 
+    # Build the lines
     lines = ["---  Top 3 Donors  ---", ""]
     for i, (name, amount, count) in enumerate(top_k, start=1):
-        # Padded name (18) plus right-aligned amount keeps the columns tidy
-        # even when one donor has given much more than the others.
+        # Lining up the columns so amounts are nicely on top of each other
         lines.append(
             f"  {i}.  {name:<18} £{amount:>9,.2f}   {count} donation"
             f"{'s' if count != 1 else ''}"
@@ -64,16 +69,20 @@ def top_donors(service: DonationService, k: int = 3) -> str:
 
 
 def campaign_progress(service: DonationService) -> str:
-    """FR-4.3: ascii bar chart of progress per campaign."""
+    """Build the 'campaign progress' report with ASCII bar charts."""
     if not service.campaigns:
         return "---  Campaign Progress  ---\n\n  (no campaigns yet)"
 
-    bar_width = 18  # characters reserved for the [###...] segment
+    # The bar is 18 characters wide
+    bar_width = 18
     lines = ["---  Campaign Progress  ---", ""]
     for campaign in service.campaigns.values():
+        # Cap at 100% in case people donated more than the goal
         pct = min(campaign.progress_percent(), 100.0)
+        # Work out how many # to draw, the rest are dots
         filled = int(round((pct / 100.0) * bar_width))
         bar = "#" * filled + "." * (bar_width - filled)
+        # Show CLOSED if the campaign is closed
         status = "  CLOSED" if campaign.is_closed else ""
         lines.append(
             f"  {campaign.name:<18} [{bar}]  {pct:5.1f}%{status}"
@@ -82,11 +91,8 @@ def campaign_progress(service: DonationService) -> str:
 
 
 def export_donations_csv(service: DonationService, path: str = CSV_EXPORT_PATH) -> str:
-    """FR-4.4: dump every donation to a CSV. Returns a confirmation string.
-
-    The donor_name column is denormalised in (looked up via donor_email)
-    so the CSV is useful even if opened separately from the program.
-    """
+    """Export every donation to a CSV file."""
+    # These are the column headers in the CSV
     headers = [
         "donation_id",
         "donor_email",
@@ -95,10 +101,12 @@ def export_donations_csv(service: DonationService, path: str = CSV_EXPORT_PATH) 
         "amount",
         "timestamp",
     ]
+    # Open the file and write the rows
     with open(path, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(headers)
         for donation in service.donations.values():
+            # Look up the donor's name from the email
             donor = service.donors.get(donation.donor_email)
             donor_name = donor.name if donor else ""
             writer.writerow(

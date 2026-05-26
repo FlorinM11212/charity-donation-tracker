@@ -1,8 +1,8 @@
-"""Donation domain model.
+"""Donation class.
 
-A Donation is a single contribution from a Donor to a Campaign. It carries
-a short receipt ID (6 hex chars derived from uuid4) so the administrator
-can read it back to a donor over the phone.
+This file holds the Donation class. A donation is one payment from a
+donor to a campaign. Each donation gets a short 6-character receipt
+ID so I can tell the donor "your receipt is XXXXXX".
 """
 
 from dataclasses import dataclass, field
@@ -11,33 +11,31 @@ from uuid import uuid4
 
 
 def _new_receipt_id() -> str:
-    # uuid4().hex is 32 chars; first 6 uppercased gives a short, readable receipt.
-    # Collisions within a single charity's lifetime are vanishingly unlikely.
+    # This makes a random 6-character receipt ID.
+    # I take the first 6 characters of a uuid4 and make them uppercase.
     return uuid4().hex[:6].upper()
 
 
 @dataclass
 class Donation:
-    """Plain data class for one donation.
+    """One donation made by a donor to a campaign."""
 
-    Attributes:
-        donation_id: 6-character uppercase hex receipt ID.
-        donor_email: Foreign key to Donor.email (lowercased).
-        campaign_name: Foreign key to Campaign.name.
-        amount: GBP amount; validators enforce 0 < amount <= 10000.
-        timestamp: ISO datetime to the second.
-    """
-
+    # Email of the donor who made the donation
     donor_email: str
+    # Name of the campaign the donation goes to
     campaign_name: str
+    # How much money was donated, in GBP
     amount: float
+    # The 6-character receipt ID (generated automatically)
     donation_id: str = field(default_factory=_new_receipt_id)
+    # When the donation was recorded
     timestamp: str = field(
-        # Trim microseconds so the timestamp prints nicely in reports.
+        # I cut off the microseconds so the time prints nicely in reports.
         default_factory=lambda: datetime.now().replace(microsecond=0).isoformat(sep=" ")
     )
 
     def to_dict(self) -> dict:
+        # This turns the donation into a dictionary so I can save it to JSON.
         return {
             "donation_id": self.donation_id,
             "donor_email": self.donor_email,
@@ -48,6 +46,7 @@ class Donation:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Donation":
+        # This builds a donation back from a dictionary loaded from JSON.
         return cls(
             donor_email=data["donor_email"],
             campaign_name=data["campaign_name"],

@@ -1,27 +1,26 @@
-"""Input validators for donor names, email addresses, campaign names,
-campaign goals, and donation amounts.
+"""Validators for the inputs the user types in.
 
-Each validator returns ``(ok, normalised_value_or_error_message)`` so the
-service layer can both reject bad input and use the cleaned-up value
-without re-doing the work (e.g. lowercased email).
+Every validator returns a tuple (ok, value_or_error). If ok is True the
+value is the cleaned input (for example the email in lowercase). If ok
+is False the second item is the error message to show the user.
 """
 
 import re
 from typing import Tuple
 
-# Email pattern from the spec: local@domain.tld with no whitespace and no
-# stray @ signs. Deliberately simple — full RFC 5322 is overkill for a CLI
-# admin tool, and the spec lists this exact regex.
+# This is the pattern I use to check emails: something@something.something
+# It is simple on purpose - the full email rules would be overkill here.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-# Donation hard cap (FR-3.5). Kept as a module constant so tests can import it.
+# The maximum donation allowed. The spec says no donation over 10,000 GBP.
 MAX_DONATION_AMOUNT = 10_000.0
 
 
 def validate_name(name: str) -> Tuple[bool, str]:
-    """Validate a donor name. Trims whitespace; requires at least 2 chars."""
+    """Check a donor name. It must be at least 2 characters."""
     if name is None:
         return False, "Name must be at least 2 characters."
+    # Remove spaces at the start and end
     cleaned = name.strip()
     if len(cleaned) < 2:
         return False, "Name must be at least 2 characters."
@@ -29,9 +28,10 @@ def validate_name(name: str) -> Tuple[bool, str]:
 
 
 def validate_email(email: str) -> Tuple[bool, str]:
-    """Validate an email address. Returns the lowercased form on success."""
+    """Check an email. Returns it in lowercase if it is valid."""
     if email is None:
         return False, "Invalid email format."
+    # I clean spaces and make it lowercase so emails compare correctly
     cleaned = email.strip().lower()
     if not _EMAIL_RE.match(cleaned):
         return False, "Invalid email format."
@@ -39,7 +39,7 @@ def validate_email(email: str) -> Tuple[bool, str]:
 
 
 def validate_campaign_name(name: str) -> Tuple[bool, str]:
-    """Validate a campaign name. Trims whitespace; requires at least 3 chars."""
+    """Check a campaign name. It must be at least 3 characters."""
     if name is None:
         return False, "Campaign name must be at least 3 characters."
     cleaned = name.strip()
@@ -49,11 +49,8 @@ def validate_campaign_name(name: str) -> Tuple[bool, str]:
 
 
 def validate_goal(raw: str) -> Tuple[bool, object]:
-    """Validate a campaign goal entered as a raw string.
-
-    Accepts ``str`` or numeric input. Returns the parsed float on success or
-    the canonical "Goal must be a positive number." message on failure.
-    """
+    """Check a campaign goal. It must be a number greater than zero."""
+    # I try to turn the input into a number; if it fails, it is not a number
     try:
         value = float(raw)
     except (TypeError, ValueError):
@@ -64,13 +61,12 @@ def validate_goal(raw: str) -> Tuple[bool, object]:
 
 
 def validate_amount(raw: str) -> Tuple[bool, object]:
-    """Validate a donation amount entered as a raw string.
+    """Check a donation amount.
 
-    Returns the parsed float on success, or one of the spec's exact error
-    messages on failure. Three distinct failure modes:
-      * non-numeric input        -> "Amount must be a positive number."
-      * zero or negative         -> "Amount must be a positive number."
-      * above the 10,000 cap     -> "Amount must not exceed 10000."
+    Three things can go wrong:
+      - The input is not a number
+      - The number is zero or negative
+      - The number is bigger than 10,000
     """
     try:
         value = float(raw)

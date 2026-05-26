@@ -1,8 +1,7 @@
-"""Donor domain model.
+"""Donor class.
 
-A Donor represents a person who has registered with the charity. Donors are
-identified uniquely by their (lowercased) email address. Each donor keeps a
-list of donation IDs that point at Donation records owned by the service.
+This file holds the Donor class. A donor is a person who registered
+in the system. I use the email as the unique ID.
 """
 
 from dataclasses import dataclass, field
@@ -12,22 +11,19 @@ from typing import List
 
 @dataclass
 class Donor:
-    """Plain data class for a registered donor.
+    """A registered donor."""
 
-    Attributes:
-        name: Donor's full name (already trimmed by the caller).
-        email: Lowercased, unique identifier.
-        donations: Receipt IDs of donations this donor has made.
-        registered_on: ISO date (YYYY-MM-DD) of registration.
-    """
-
+    # The donor's full name
     name: str
+    # The donor's email - used as the unique ID
     email: str
+    # List of donation IDs this donor has made
     donations: List[str] = field(default_factory=list)
+    # The date the donor was added (today by default)
     registered_on: str = field(default_factory=lambda: date.today().isoformat())
 
     def to_dict(self) -> dict:
-        # Serialise to a plain dict so storage.py can dump it as JSON.
+        # This turns the donor into a dictionary so I can save it to JSON.
         return {
             "name": self.name,
             "email": self.email,
@@ -37,8 +33,7 @@ class Donor:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Donor":
-        # Reconstruct a Donor from JSON. Default donations to [] if missing
-        # so older data files (without the field) still load cleanly.
+        # This builds a donor back from a dictionary loaded from JSON.
         return cls(
             name=data["name"],
             email=data["email"],

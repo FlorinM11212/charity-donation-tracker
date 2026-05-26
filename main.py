@@ -1,9 +1,8 @@
-"""Entry point for the Charity Donation Tracker.
+"""This is the main file. I run the program by typing: python main.py
 
-Runs the text menu loop, dispatches user choices to the DonationService,
-and persists state via storage.save() on a clean exit. Every input read
-is wrapped so a typo never crashes the program — bad input prints a
-clear message and re-prompts.
+It shows a text menu, asks the user what they want to do, and calls
+the right method on the DonationService. When the user picks "Save and
+Exit" it saves everything to data.json.
 """
 
 import sys
@@ -13,47 +12,37 @@ from src import reports, storage
 from src.donation_service import DonationService
 
 
-# Windows defaults stdout to cp1252, which cannot encode ✓ / ✗ / £ /
-# en-dashes. Force UTF-8 at startup so the spec's exact glyphs always
-# render. ``reconfigure`` exists from Python 3.7 and is a no-op on
-# already-UTF-8 streams.
+# On Windows the console sometimes can't print special characters like
+# ✓ ✗ £ and –. This function tells Python to use UTF-8 so those work.
 def _force_utf8_stdio() -> None:
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):
-            # Non-text streams (rare) or already-closed streams: ignore.
+            # If something goes wrong, just skip it
             pass
 
 
+# Run the UTF-8 fix right away when the program starts
 _force_utf8_stdio()
 
 
-# ---- Small console helpers -------------------------------------------------
+# ---- Small helpers for printing and asking ---------------------------------
 
-# Borders defined once so the visual style is consistent everywhere.
+# I print these borders around the menus to make them look nicer
 MAIN_BORDER = "=" * 60
 SUB_BORDER = "-" * 60
 
 
 def _ask(prompt: str) -> str:
-    """Read a line from stdin. Strips trailing newline and surrounding spaces.
-
-    KeyboardInterrupt bubbles up to the main loop, where we save and exit.
-    EOF (piped input exhausted, terminal closed) is also propagated; the
-    main loop catches it and treats it as a clean save-and-exit so the
-    program does not spin forever re-prompting on an empty stdin.
-    """
+    """Ask the user a question and return the answer with spaces removed."""
     return input(prompt).strip()
 
 
 def _pause() -> None:
-    """Standard 'press Enter' pause used at the end of every action.
-
-    If stdin is not a TTY (e.g. piped input during a smoke test) the pause
-    is skipped — otherwise we'd burn the EOF here and then loop forever in
-    the calling menu. Real terminals always pause as expected.
-    """
+    """Pause until the user presses Enter."""
+    # If the input is piped (like from a test), skip the pause - otherwise
+    # the program would get stuck waiting forever.
     if not sys.stdin.isatty():
         return
     try:
@@ -63,20 +52,22 @@ def _pause() -> None:
 
 
 def _print_success(msg: str) -> None:
+    # All success messages start with a tick
     print(f"✓ {msg}")
 
 
 def _print_error(msg: str) -> None:
-    # Spec rule: error messages start with "✗ " and end with a full stop.
+    # All error messages start with a cross and end with a full stop
     if not msg.endswith("."):
         msg = msg + "."
     print(f"✗ {msg}")
 
 
-# ---- Main and sub-menus ----------------------------------------------------
+# ---- The menus -------------------------------------------------------------
 
 
 def _main_menu_screen() -> None:
+    # Print the main menu screen
     print()
     print(MAIN_BORDER)
     print("        CHARITY DONATION TRACKER  –  Main Menu")
@@ -92,19 +83,20 @@ def _main_menu_screen() -> None:
 
 
 def _menu_loop(prompt_text: str, options: dict) -> None:
-    """Generic loop: print options, dispatch, repeat until "back".
+    """Show a sub-menu and keep asking until the user picks 'Back'.
 
-    ``options`` maps the choice string ('1', '2', ...) to either:
-      * a (label, callable) pair for an action, or
-      * (label, None) for the back-out entry, which exits the loop.
+    options is a dictionary like {"1": ("label", handler_function), ...}
+    If handler_function is None, that option means 'go back'.
     """
     while True:
         print()
         print(f"---  {prompt_text}  ---")
         print()
+        # Print each option in order
         for key in sorted(options.keys()):
             label, _ = options[key]
             print(f"  {key}.  {label}")
+        # Ask the user what they want
         choice = _ask(f"\n  Enter your choice (1-{len(options)}): ")
         entry = options.get(choice)
         if entry is None:
@@ -112,15 +104,19 @@ def _menu_loop(prompt_text: str, options: dict) -> None:
             _pause()
             continue
         _, handler = entry
+        # If handler is None, that means 'go back to the main menu'
         if handler is None:
             return
+        # Otherwise call the function for that option
         handler()
 
 
-# ---- Donor handlers --------------------------------------------------------
+# ---- Donor menu actions ----------------------------------------------------
 
 
 def _do_register_donor(service: DonationService) -> Callable[[], None]:
+    # I return a function that does the actual work. This way I can
+    # pass it into the menu loop and let it call it when needed.
     def handler() -> None:
         print()
         name = _ask("  Full name : ")
@@ -143,7 +139,7 @@ def _do_list_donors(service: DonationService) -> Callable[[], None]:
             print("No donors registered yet.")
             _pause()
             return
-        # Fixed-width columns so the table lines up across rows.
+        # Print the table header with fixed-width columns so it lines up
         print(f"  {'Name':<23} {'Email':<27} Donations")
         print(f"  {'-' * 23} {'-' * 27} {'-' * 9}")
         for donor in donors:
@@ -165,6 +161,7 @@ def _do_lookup_donor(service: DonationService) -> Callable[[], None]:
             _print_error("No donor found with that email.")
             _pause()
             return
+        # Got the donor - now show their donation history
         donations = service.donations_for_donor(donor.email)
         total = sum(d.amount for d in donations)
         print()
@@ -187,6 +184,7 @@ def _do_lookup_donor(service: DonationService) -> Callable[[], None]:
 
 
 def _donor_menu(service: DonationService) -> None:
+    # Show the Donor Management sub-menu
     _menu_loop(
         "Donor Management",
         {
@@ -198,7 +196,7 @@ def _donor_menu(service: DonationService) -> None:
     )
 
 
-# ---- Campaign handlers -----------------------------------------------------
+# ---- Campaign menu actions -------------------------------------------------
 
 
 def _do_create_campaign(service: DonationService) -> Callable[[], None]:
@@ -226,6 +224,7 @@ def _do_list_campaigns(service: DonationService) -> Callable[[], None]:
             print("No campaigns yet.")
             _pause()
             return
+        # Print the table header
         print(
             f"  {'Name':<18} {'Goal':>10} {'Raised':>10} {'Progress':>9}  Status"
         )
@@ -256,6 +255,7 @@ def _do_close_campaign(service: DonationService) -> Callable[[], None]:
 
 
 def _campaign_menu(service: DonationService) -> None:
+    # Show the Campaign Management sub-menu
     _menu_loop(
         "Campaign Management",
         {
@@ -267,10 +267,12 @@ def _campaign_menu(service: DonationService) -> None:
     )
 
 
-# ---- Donation flow ---------------------------------------------------------
+# ---- Recording a donation --------------------------------------------------
 
 
 def _record_donation(service: DonationService) -> None:
+    # This is the flow for option 3 in the main menu - asks 3 questions
+    # one by one and then tries to record the donation.
     print()
     print("---  Record a Donation  ---")
     print()
@@ -282,6 +284,7 @@ def _record_donation(service: DonationService) -> None:
         _print_error(payload)
         _pause()
         return
+    # The donation was saved - show the receipt and the updated progress
     donation = payload
     donor = service.donors[donation.donor_email]
     campaign = service.campaigns[donation.campaign_name]
@@ -298,10 +301,11 @@ def _record_donation(service: DonationService) -> None:
     _pause()
 
 
-# ---- Reports ---------------------------------------------------------------
+# ---- Reports menu ----------------------------------------------------------
 
 
 def _reports_menu(service: DonationService) -> None:
+    # Show the Reports sub-menu. Each option just prints a report.
     _menu_loop(
         "Reports",
         {
@@ -323,30 +327,32 @@ def _reports_menu(service: DonationService) -> None:
 
 
 def _export_csv(service: DonationService) -> None:
+    # Run the CSV export and show the result
     print()
     msg = reports.export_donations_csv(service)
     print(msg)
     _pause()
 
 
-# ---- Main loop -------------------------------------------------------------
+# ---- The main loop ---------------------------------------------------------
 
 
 def main() -> None:
+    # Load the saved data when the program starts
     donors, campaigns, donations, warning = storage.load()
     service = DonationService()
     service.donors = donors
     service.campaigns = campaigns
     service.donations = donations
 
+    # If the data file was broken, tell the user before showing the menu
     if warning:
-        # Surface storage problems on launch, before the menu, so the user
-        # knows why the database looks empty.
         print()
         _print_error(warning)
         _pause()
 
     try:
+        # Keep showing the main menu forever, until the user picks 6
         while True:
             _main_menu_screen()
             choice = _ask("  Enter your choice (1-6): ")
@@ -361,6 +367,7 @@ def main() -> None:
             elif choice == "5":
                 _export_csv(service)
             elif choice == "6":
+                # Save everything and quit
                 storage.save(service.donors, service.campaigns, service.donations)
                 print()
                 print("Data saved. Goodbye!")
@@ -369,15 +376,15 @@ def main() -> None:
                 _print_error("Invalid choice. Please pick a number from 1 to 6.")
                 _pause()
     except KeyboardInterrupt:
-        # Ctrl+C anywhere: still save before exiting (FR-5.3 / section 9).
+        # If the user presses Ctrl+C, still save before exiting
         storage.save(service.donors, service.campaigns, service.donations)
         print("\n\nInterrupted. Data saved. Goodbye!")
     except EOFError:
-        # stdin closed (piped input exhausted, terminal hangup): same
-        # treatment as a clean exit, just without the goodbye animation.
+        # If the input ends suddenly (no terminal), also save and exit
         storage.save(service.donors, service.campaigns, service.donations)
         print("\n\nInput stream closed. Data saved. Goodbye!")
 
 
+# Only run main() if this file is executed directly (not imported)
 if __name__ == "__main__":
     main()

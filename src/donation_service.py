@@ -1,14 +1,9 @@
-"""Business logic for the Charity Donation Tracker.
+"""The main service that holds the program's data and rules.
 
-The service is the single source of truth for the in-memory state. The
-menu (main.py) and the BDD step definitions both drive it through the
-methods below — they never mutate the dictionaries directly. Each public
-method returns ``(ok, payload)`` where ``payload`` is either the created
-domain object on success or a human-readable error message on failure.
-
-This shape keeps the menu code dumb (just print the message) and makes
-the BDD assertions trivial: success = ok is True, and the error message
-is right there when ok is False.
+This class is the brain of the program. Both the menu (main.py) and the
+BDD tests call its methods. Every method returns two things: True/False
+to say if it worked, and either the new object or an error message.
+This way the menu just has to print whatever the second item is.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -26,120 +21,120 @@ from src.validators import (
 
 
 class DonationService:
-    """In-memory orchestrator for donors, campaigns, and donations."""
+    """Holds all the donors, campaigns and donations in memory."""
 
     def __init__(self) -> None:
-        # All three indices are keyed for O(1) lookup. Donors by lowercased
-        # email so duplicate detection is case-insensitive (FR-1.2).
+        # I use dictionaries because they let me find things fast.
+        # Donors are keyed by email (in lowercase) so I can detect duplicates.
         self.donors: Dict[str, Donor] = {}
         self.campaigns: Dict[str, Campaign] = {}
         self.donations: Dict[str, Donation] = {}
 
-    # ---- Donor operations ------------------------------------------------
+    # ---- Donor methods ---------------------------------------------------
 
     def register_donor(self, name: str, email: str) -> Tuple[bool, object]:
-        """Register a new donor. Returns (True, Donor) or (False, error)."""
+        """Add a new donor. Returns (True, donor) on success."""
+        # First check the name is valid
         ok_name, name_or_err = validate_name(name)
         if not ok_name:
             return False, name_or_err
 
+        # Then check the email is valid
         ok_email, email_or_err = validate_email(email)
         if not ok_email:
             return False, email_or_err
 
-        # Email lookup is case-insensitive because validate_email lowercases.
+        # Check the email is not already used (lowercase compare)
         if email_or_err in self.donors:
             return False, "A donor with this email already exists."
 
+        # All good - make the donor and store it
         donor = Donor(name=name_or_err, email=email_or_err)
         self.donors[donor.email] = donor
         return True, donor
 
     def list_donors(self) -> List[Donor]:
-        """All donors sorted alphabetically by name (case-insensitive)."""
+        """Get all donors sorted by name (A to Z)."""
         return sorted(self.donors.values(), key=lambda d: d.name.lower())
 
     def find_donor(self, email: str) -> Optional[Donor]:
-        """Look up a donor by email; returns None if not found or invalid."""
+        """Find a donor by email. Returns None if no donor matches."""
         ok, cleaned = validate_email(email)
         if not ok:
             return None
         return self.donors.get(cleaned)
 
-    # ---- Campaign operations --------------------------------------------
+    # ---- Campaign methods -----------------------------------------------
 
     def create_campaign(self, name: str, goal_raw: object) -> Tuple[bool, object]:
-        """Create a campaign. Returns (True, Campaign) or (False, error).
-
-        ``goal_raw`` can be a string (typed at the menu) or a number (from
-        BDD steps); validate_goal handles both.
-        """
+        """Make a new campaign. The goal must be a positive number."""
+        # Check the name first
         ok_name, name_or_err = validate_campaign_name(name)
         if not ok_name:
             return False, name_or_err
 
+        # Make sure the name is not already used
         if name_or_err in self.campaigns:
             return False, "A campaign with this name already exists."
 
+        # Check the goal is a positive number
         ok_goal, goal_or_err = validate_goal(goal_raw)
         if not ok_goal:
             return False, goal_or_err
 
+        # All good - make the campaign and store it
         campaign = Campaign(name=name_or_err, goal=float(goal_or_err))
         self.campaigns[campaign.name] = campaign
         return True, campaign
 
     def list_campaigns(self) -> List[Campaign]:
-        """All campaigns in insertion order (so the user sees newest last)."""
+        """Get all campaigns in the order they were added."""
         return list(self.campaigns.values())
 
     def close_campaign(self, name: str) -> Tuple[bool, object]:
-        """Mark a campaign as closed. Idempotent guard against double-close."""
+        """Close a campaign so it cannot accept more donations."""
         cleaned = (name or "").strip()
         campaign = self.campaigns.get(cleaned)
         if campaign is None:
             return False, "No campaign with that name."
+        # Don't close it twice
         if campaign.is_closed:
             return False, "Campaign is already closed."
         campaign.is_closed = True
         return True, campaign
 
-    # ---- Donation operations --------------------------------------------
+    # ---- Donation methods -----------------------------------------------
 
     def record_donation(
         self, donor_email: str, campaign_name: str, amount_raw: object
     ) -> Tuple[bool, object]:
-        """Validate and record a donation. (True, Donation) or (False, error).
-
-        Validation order is the spec's chain (8.7): donor, campaign, open,
-        amount-is-number, amount-positive, amount<=10000. Order matters
-        because each later check depends on the previous one having passed.
-        """
+        """Record a new donation. Runs all the checks one by one."""
+        # Check 1: is the email a real donor?
         ok_email, email_or_err = validate_email(donor_email)
         if not ok_email or email_or_err not in self.donors:
-            # Spec uses a single "Donor not registered" message for both an
-            # unknown donor and an obviously-malformed email; the user is
-            # being told the same thing either way.
             return False, "Donor not registered."
 
+        # Check 2: does the campaign exist?
         campaign = self.campaigns.get((campaign_name or "").strip())
         if campaign is None:
             return False, "Campaign not found."
+        # Check 3: is the campaign still open?
         if campaign.is_closed:
             return False, "Campaign is closed."
 
+        # Check 4: is the amount a valid number > 0 and <= 10000?
         ok_amount, amount_or_err = validate_amount(amount_raw)
         if not ok_amount:
             return False, amount_or_err
 
+        # All checks passed - make the donation
         donation = Donation(
             donor_email=email_or_err,
             campaign_name=campaign.name,
             amount=float(amount_or_err),
         )
-        # Guarantee uniqueness of the 6-char receipt id within this session
-        # (uuid4 collisions are extremely rare, but the cost of avoiding
-        # them is one cheap loop check).
+        # Just in case the random ID was already used, generate a new one.
+        # This is very unlikely but I want to be safe.
         while donation.donation_id in self.donations:
             donation = Donation(
                 donor_email=email_or_err,
@@ -147,13 +142,14 @@ class DonationService:
                 amount=float(amount_or_err),
             )
 
+        # Save the donation, link it to the donor, and update the campaign total
         self.donations[donation.donation_id] = donation
         self.donors[email_or_err].donations.append(donation.donation_id)
         campaign.raised += donation.amount
         return True, donation
 
     def donations_for_donor(self, email: str) -> List[Donation]:
-        """All donation records belonging to a donor, oldest first."""
+        """Get all donations for a donor, in the order they were made."""
         donor = self.find_donor(email)
         if donor is None:
             return []
