@@ -1,0 +1,4 @@
+__pycache__/
+data.json
+donations_export.csv
+*.docx
